@@ -3,9 +3,9 @@ from sys import stdout
 from time import sleep
 from datetime import datetime, timedelta
 from threading import Thread
-from ics import Calendar
+from icalendar import Calendar
 from urllib2 import urlopen
-
+import recurring_ical_events
 
 class Scheduler(object):
     """
@@ -41,9 +41,11 @@ class Scheduler(object):
     def _fetch_events(self):
         try:
             req = urlopen(self.ical_url)
-            c = Calendar(req.read().decode('iso-8859-1'))
+            c = Calendar.from_ical(req.read())
             req.close()
-            return c.events
+            now = datetime.utcnow().replace(tzinfo = pytz.utc)
+            events = recurring_ical_events.of(c).at(now.date())
+            return events
         except Exception, e:
             t = datetime.utcnow().replace(tzinfo = pytz.utc)
             stdout.write('%s : Failed to load Calendar\n' % t.isoformat())
@@ -55,33 +57,37 @@ class Scheduler(object):
             return
         now = datetime.utcnow().replace(tzinfo = pytz.utc)
         for e in events:
-            if e.end.datetime >= now:
-                if e.uid in self._queued_actions:
-                    start_action, end_action = self._queued_actions[e.uid]
+            uid = e["UID"]
+            name = e["SUMMARY"]
+            start = e["DTSTART"].dt
+            end = e["DTEND"].dt
+            if end >= now:
+                if uid in self._queued_actions:
+                    start_action, end_action = self._queued_actions[uid]
                     if (start_action.scheduledTime < now and
-                            e.begin.datetime > now):
+                            start > now):
                         # if active event is rescheduled to the future then end
                         # it immediately and requeue the start action
                         end_action.execute()
                         self._action_queue.append(start_action)
-                    if (start_action.scheduledTime != e.begin.datetime or
-                            end_action.scheduledTime != e.end.datetime):
+                    if (start_action.scheduledTime != start or
+                            end_action.scheduledTime != end):
                         stdout.write('%s : Event rescheduled %s\n' %
-                                     (now.isoformat(), e.uid))
-                        start_action.scheduledTime = e.begin.datetime
-                        end_action.scheduledTime = e.end.datetime
-                elif e.name in self.action_dict:
+                                     (now.isoformat(), uid))
+                        start_action.scheduledTime = start
+                        end_action.scheduledTime = end
+                elif name in self.action_dict:
                     stdout.write('%s : Found event %s\n' %
-                                 (now.isoformat(), e.uid))
-                    start_action = ScheduledAction(self.action_dict[e.name][0],
-                                                   e.begin.datetime,
-                                                   e.uid)
-                    end_action = ScheduledAction(self.action_dict[e.name][1],
-                                                 e.end.datetime,
-                                                 e.uid)
+                                 (now.isoformat(), uid))
+                    start_action = ScheduledAction(self.action_dict[name][0],
+                                                   start,
+                                                   uid)
+                    end_action = ScheduledAction(self.action_dict[name][1],
+                                                 end,
+                                                 uid)
                     self._action_queue.append(start_action)
                     self._action_queue.append(end_action)
-                    self._queued_actions[e.uid] = (start_action, end_action)
+                    self._queued_actions[uid] = (start_action, end_action)
         self._action_queue.sort(key=lambda c: c.scheduledTime, reverse=True)
 
     def _check_queue(self, now):
