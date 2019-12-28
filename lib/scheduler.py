@@ -57,10 +57,10 @@ class Scheduler(object):
             return
         now = datetime.utcnow().replace(tzinfo = pytz.utc)
         for e in events:
-            uid = e["UID"]
             name = e["SUMMARY"]
             start = e["DTSTART"].dt
             end = e["DTEND"].dt
+            uid = start.strftime('%Y%m%d%H%M') + '-' + e["UID"]
             if end >= now:
                 if uid in self._queued_actions:
                     start_action, end_action = self._queued_actions[uid]
